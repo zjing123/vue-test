@@ -1,6 +1,6 @@
 <template>
   <div class="tags-textarea">
-   <input-tags :tags="tags">
+   <input-tags :tags="tags" @tags-changed="newTags => tags = newTags" @before-deleting-tag="beforeDelete">
    </input-tags>
  </div>
 </template>
@@ -15,12 +15,17 @@ export default {
   data() {
     return {
       tag: '',
-      tags: [{text:'abd'}, {text:'efg'}],
+      tags: [1,2,3,4,5,6,7,8,9,10,11,12,12,14,15,165,161,1241,15151,151],
+    }
+  },
+  methods : {
+    beforeDelete (paras) {
+      console.log(paras)
     }
   },
   watch : {
     'tags' () {
-      console.log(this.tags)
+      console.log('pareent',this.tags)
     }
   }
 };

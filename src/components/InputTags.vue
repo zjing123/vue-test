@@ -1,55 +1,42 @@
 <template>
   <div>
-    <span class="tag" v-for="(tag, index) in tagsCopy" :key="index">
-      <span class="content" ref="tagCenter">
-        <span
-          @click="performEditTag(index, tag)"
-          :class="{ hidden: tagsEditStatus[index] }">{{ tag.text }}</span>
-        <input
-          type="text"
-          class="tag-input"
-          v-if="tagsEditStatus[index]"
-          :maxlength="maxlength"
-          size="1"
-          ref="tagInput"
-          v-model="tag.text"
-          @input="createdChangedTag(index, tag)"
-          @blur="cancelEdit(index)"
-          @keydown.enter="performSaveTag(index, tag)"
-        />
-      </span>
-      <span class="actions">
-        <i
-          @click="cancelEdit(index)"
-          v-if="!$scopedSlots.tagActions"
-          v-show="tagsEditStatus[index]"
-          class="icon-undo">
-        </i>
-        <i
-          @click="performDeleteTag(index, tag)"
-          v-if="!$scopedSlots.tagActions"
-          v-show="!tagsEditStatus[index]"
-          class="icon-close">
-        </i>
-      </span>
-    </span>
-    <span>
-      <input
-        class="new-tag-input"
-        v-bind="$attrs"
-        type="text"
-        ref="newTagInput"
-        :placeholder="placeholder"
-        v-model="newTag"
-        @keydown.enter="performAddTags(newTag)"
-        @keydown.8="invokeDelete"
-        @keydown.38="selectItem($event, 'before')"
-        @keydown.40="selectItem($event, 'after')"
-        @input="updateNewTag"
-        @focus="focused=true"
-        :disabled="disabled"
-        />
-    </span>
+    <div class="tagsContainer form-control clearfix" :class="{'form-control-focus': focused}" @click="inputFocus">
+      <div class="tagList">
+        <div class="tag" v-for="(tag, index) in tagsCopy" :key="index" ref="tag">
+          <div class="tagItem" :class="[{ 'deletion-mark': isMarked(index), hidden: tagsEditStatus[index] }]" @click.stop="performEditTag(index)">
+            <span>{{tag.text}}</span>
+            <div>
+              <i class="icon-delete" @click.stop="performDeleteTag(index)"></i>
+            </div>
+          </div>
+          <input
+            type="text"
+            v-if="tagsEditStatus[index]"
+            :maxlength="maxlength"
+            v-model="tag.text"
+            @input="createChangedTag(index, tag)"
+            @blur="cancelEdit(index)"
+            @keydown.enter="performSaveTag(index)"
+            class="updateInput"
+            @click.stop
+            />
+        </div>
+        <div class="new-tag-input-wrapper">
+          <input
+            type="text"
+            class="new-tag-input"
+            ref="newTagInput"
+            @blur="blurInput"
+            :placeholder="placeholder"
+            v-model="newTag"
+            :maxlength="maxlength"
+            @keydown.enter="performAddTags(newTag)"
+            @keydown.8="invokeDelete"
+            :disabled="disabled"
+            />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -77,7 +64,6 @@ export default {
     },
     maxlength: {
       type: Number,
-      default: 1
     },
     separators: {
       type: Array,
@@ -123,15 +109,26 @@ export default {
       type: Boolean,
       default: true
     },
+    deleteOnBackslash: {
+      type: Boolean,
+      default: true
+    },
+    addOnBlur: {
+      type: Boolean,
+      default: true
+    },
     maxTag: {
       type: Number,
     }
   },
   data () {
     return {
-      newTag: null,
-      tagsCopy: [],
+      newTag: '',
+      tagsCopy: null,
       tagsEditStatus: null,
+      focused: false,
+      deletionMark: null,
+      deletionMarkTime: null
     }
   },
   methods: {
@@ -143,28 +140,38 @@ export default {
       if(typeof tag === 'string') tags = this.createTagTexts(tag);
       tags.forEach(tag => {
         tag = createTag(tag, this.tags, this.validation, false);
-        if(!this._events['before-adding-tag']) this.addTag(tag);
+        if(!this._events['before-adding-tag'])this.addTag(tag);
         this.$emit('before-adding-tag', {
           tag,
           addTag: (goOn) => this.addTag(tag, goOn),
-        })
-      })
+        });
+      });
     },
-    addTag(tag, goOn) {
+    addTag (tag, goOn) {
       if(goOn === false) return;
-      const maxItemReached  = this.maxTags && this.maxTags === this.tagsCopy.length;
+      const maxItemReached = this.maxTags && this.maxTags === this.tagsCopy.length;
       if(maxItemReached) return this.$emit('max-tags-reached');
       const dup = this.avoidAddingDuplicates && this.tagsCopy.map(t => t.text).includes(tag.text);
-      if(dup) {
-        this.newTag = '';
-        return this.$emit('adding-duplicate', tag);
-      }
+      if(dup) return this.$emit('adding-duplicate', tag);
       if(!tag.valid && this.hasForbiddingAddRule(tag.tiClasses)) return;
-      this.tagsCopy.push(tag);
       this.newTag = '';
-      this.$emit('input', '');
+      this.tagsCopy.push(tag);
       this.$emit('tags-changed', this.tagsCopy);
-      this.$emit('add-tag', tag);
+    },
+    createTagTexts (string) {
+      const regex = new RegExp(this.separators.map(s => this.quote(s)).join('|'));
+      return string.split(regex).map(text => {
+        return { text };
+      });
+    },
+    hasForbiddingAddRule (tiClasses) {
+      return tiClasses.some(type => {
+        const rule = this.validation.find(rule => type === rule.type);
+        return rule ? rule.disableAdd : false;
+      });
+    },
+    quote (regex) {
+      return regex.replace(/([()[{*+.$^\\|?])/g, '\\$1');
     },
     performEditTag (index) {
       if(!this.allowEditTags) return;
@@ -172,46 +179,104 @@ export default {
       this.$emit('before-editing-tag', {
         index,
         tag: this.tagsCopy[index],
-        editTag: (goOn) => this.editTag(index, goOn)
+        editTag: (goOn) => this.editTag(index, goOn),
       });
+      console.log('edit', index)
     },
-    editTag (index, goOn) {
+    editTag(index,goOn) {
       if(!this.allowEditTags || goOn === false) return;
       this.toggleEdit(index);
       this.focus(index);
+    },
+    focus (index) {
+      this.$nextTick(() => {
+        const el = this.$refs.tag[index].querySelector('input.updateInput');
+        if(el) el.focus();
+      });
     },
     toggleEdit (index) {
       if(!this.allowEditTags || this.disabled) return;
       this.$set(this.tagsEditStatus, index, !this.tagsEditStatus[index]);
     },
-    focus (index) {
-      this.$nextTick(() => {
-        const el = this.$refs.tagCenter[index].querySelector('input.tag-input');
-        console.log(el)
-        if(el) el.focus();
+    cancelEdit (index) {
+      this.tagsCopy[index] = Object.assign({},
+        createTag(this.tags[index], this.tags, this.validation)
+      );
+      this.$set(this.tagsEditStatus, index, false);
+    },
+    createChangedTag (index, tag) {
+      /*使用setTimeout延时10毫秒防止inpput不能获取中文字符的问题*/
+      setTimeout(() => {
+        const tags = this.tagsCopy;
+        this.$set(this.tagsCopy, index, createTag(tags[index], tags, this.validation));
+      }, 10);
+    },
+    performSaveTag (index) {
+      const tag = this.tagsCopy[index];
+      if(this.disabled) return;
+      if(tag.text.length === 0) return;
+      if(!this._events['before-saving-tag']) this.saveTag(index, tag);
+      this.$emit('before-saveing-tag', {
+        index,
+        tag,
+        saveTag: (goOn) => this.saveTag(index, tag, goOn),
       });
     },
-    createTagTexts (string) {
-      const regex = new RegExp(this.separators.map(s => this.quote(s)).join('|'));
-      return string.split(regex).map(text => {
-        return { text };
-      })
+    saveTag (index, tag, goOn) {
+      if(goOn === false) return;
+      const dup = this.avoidAddingDuplicates && this.tags.map(t => t.text).includes(tag.text);
+      if(dup) return this.$emit('saving-duplicate', tag);
+      if(!tag.valid && this.hasForbiddingAddRule(tag.tiClasses)) return;
+      this.$set(this.tagsCopy, index, tag);
+      this.toggleEdit(index);
+      this.$emit('tags-changed', this.tagsCopy);
     },
-    quote (regex) {
-      return regex.replace(/([()[{*+.$^\\|?])/g, '\\$1');
+    invokeDelete () {
+      if(!this.deleteOnBackslash || this.newTag.length > 0) return;
+      const lastIndex = this.tagsCopy.length - 1;
+      console.log(lastIndex)
+      if(this.deletionMark === null) {
+        this.deletionMarkTime = setTimeout(() => this.deletionMark = null, 1000);
+        this.deletionMark = lastIndex;
+      } else {
+        this.performDeleteTag(lastIndex);
+      }
     },
-    hasForbiddingAddRule (tagClasses) {
-      return tagClasses.some(type => {
-        const rule = this.validation.find(rule => type === rule.type);
-        return rule ? rule.disableAdd : false;
+    performDeleteTag (index) {
+      if(!this._events['before-deleting-tag']) this.deleteTag(index);
+      this.$emit('before-deleting-tag', {
+        index,
+        tag: this.tagsCopy[index],
+        deleteTag: (goOn) => this.deleteTag(index, goOn)
       });
+      console.log('dele', index);
     },
-    updateNewTag () {
-
+    deleteTag (index, goOn) {
+      if(goOn === false) return;
+      if(this.disabled) return;
+      this.deletionMark = null;
+      clearTimeout(this.deletionMarkTime);
+      this.tagsCopy.splice(index, 1);
+      this.$emit('tags-changed', this.tagsCopy);
+    },
+    isMarked (index) {
+      return this.deletionMark === index;
+    },
+    inputFocus () {
+      if(this.disabled) {
+        return;
+      }
+      this.$refs.newTagInput.focus();
+      this.focused = true;
+    },
+    blurInput () {
+      this.focused = false;
     },
     initTags () {
       this.tagsCopy = createTags(this.tags, this.validation);
       this.tagsEditStatus = this.clone(this.tags).map(() => false);
+      console.log('tags', this.tags);
+      console.log('tagsCopy', this.tagsCopy);
     },
     clone (items) {
       return JSON.parse(JSON.stringify(items));
@@ -228,7 +293,6 @@ export default {
   created () {
     this.initTags();
   }
-
 };
 </script>
 <style scoped lang="scss">
@@ -238,84 +302,132 @@ export default {
     font-family: 'icomoon';
     src:  url('../assets/fonts/custom/icomoon.eot?7grlse');
     src:  url('../assets/fonts/custom/icomoon.eot?7grlse#iefix') format('embedded-opentype'),
-          url('../assets/fonts/custom/icomoon.ttf?7grlse') format('truetype'),
-          url('../assets/fonts/custom/icomoon.woff?7grlse') format('woff');
+      url('../assets/fonts/custom/icomoon.ttf?7grlse') format('truetype'),
+      url('../assets/fonts/custom/icomoon.woff?7grlse') format('woff');
     font-weight: normal;
     font-style: normal;
   }
 
-  [class^="icon-"],[class*=" icon-"] {
+  [class^="icon-"],[class*="icon-"] {
     font-family: 'icomoon' !important;
-    speak:none;
+    speak: none;
     font-style: normal;
     font-weight: normal;
     font-variant: normal;
     text-transform: none;
     line-height: 1;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
   }
 
-  .icon-check:before {
-    content: "\e902";
-  }
-  .icon-close:before {
-    content: "\e901";
-  }
-  .icon-undo:before {
-    content: "\e900";
+  .tagsContainer {
+    min-height: 100px;
   }
 
-  *, *:before, *:after {
-    box-sizing: border-box;
-  }
-
-  input:focus {
-    outline: none;
-  }
-  input[disabled] {
-    background-color: transparent;
-  }
-
-  .input {
-    border: 1px solid #ccc;
-    padding: 4px;
-    flex-wrap: wrap;
-  }
-  .tags {
-    flex-wrap: wrap;
-    width: 100%;
-  }
-
-  .tag {
-    background-color: $primary;
-    color: #fff;
-    border-radius: 2px;
-    padding: 3px 5px;
-    margin: 2px;
-    font-size: .85em;
-    &:focus {
-      outline: none;
+  .tagsContainer {
+    .tagList, .tagInput {
+      float: left;
     }
-    .content {
-      display: inline;
-      align-items: center;
+
+    .tag {
+      float: left;
     }
-    .tag-center {
-      position: relative;
+
+    .deletion-mark {
+      background-color: $error !important;
     }
-    span.hidden {
-      padding-left: 16px;
-      visibility: hidden;
-      height: 0px;
-    }
-    .actions {
-      margin-left: 2px;
-      align-items: center;
-      font-size: 1.15em;
-      i {
+
+    .tag {
+      .tagItem {
+        height:30px;
+        line-height:30px;
+        background-color: $itemColor;
+        padding: 5px 10px;
+        text-align: center;
+        float: left;
+        margin: 5px;
+        border-radius: 10px;
+        color: #ffffff;
+        font-size: 1em;
+        letter-spacing: 2px;
         cursor: pointer;
+
+        .icon-delete {
+          float: right;
+          width: 15px;
+          height: 15px;
+          background-image: url('../assets/img/x.png');
+          background-repeat: round;
+          margin-top: -40px;
+          margin-right: -10px;
+          display: none;
+        }
+      }
+
+      .hidden {
+        visibility: hidden;
+        height: 0px;
+        padding-left: 16px;
+      }
+
+      .tagItem:hover {
+        background-color: $hoverColor;
+
+        .icon-delete {
+          display: block;
+        }
+      }
+
+      .updateInput {
+        outline: none;
+        height: 40px;
+        line-height: 40px;
+        font-size: 18px;
+        border: solid thin $updateColor;
+        border-radius: 5px;
+        margin: 5px;
+        padding: 0px 5px;
+        text-align: center;
+        float: left;
       }
     }
+
+    .new-tag-input {
+      outline: none;
+    	height: 40px;
+    	line-height: 40px;
+    	font-size: 18px;
+    	border: none;
+    	border-radius: 5px;
+    	margin: 5px;
+    	padding: 0px 5px;
+    	text-align: left;
+      width: auto;
+    }
+
+    .new-tag-input:focus {
+      border: none;
+    }
+
+    .new-tag-input-wrapper {
+      float: left;
+    }
+  }
+
+  .form-control {
+    background-color: #ffffff;
+    background-image: none;
+    border: 1px solid #e4eaec;
+    border-radius: 3px;
+    transition: box-shadow .25s linear,border .25s linear,color .25s linear,background-color .25s linear
+  }
+
+  .form-control-focus {
+    border-color: #62a8ea;
+    box-shadow: none
+  }
+
+  .clearfix::after {
+    display: block;
+    content: "";
+    clear: both;
   }
 </style>
